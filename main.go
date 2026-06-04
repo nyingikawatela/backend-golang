@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -13,6 +14,15 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 }
+	type parameter struct{
+		Body string `json:"body"`
+	}
+	type error struct{
+		Err string `json:"err"`
+	}
+	type resp struct{
+		Valid bool `json:"valid"`
+	}
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func (w http.ResponseWriter, r *http.Request){
@@ -37,7 +47,7 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request){
 			</body>
 		</html>
 	`, cfg.fileserverHits.Load())
-	fmt.Fprintf(w, html)
+	w.Write([]byte(html))
 }
 
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request){
@@ -46,6 +56,35 @@ func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request){
 	cfg.fileserverHits.Store(0)
 }
 
+func erronAux(msg string, w http.ResponseWriter){
+	res := error{
+		Err: msg, 
+	}
+	dat, _ := json.Marshal(res)
+	w.WriteHeader(http.StatusBadRequest)
+	w.Write(dat)
+}
+
+func validate_chirpHandle(w http.ResponseWriter, r *http.Request){
+	var data parameter;
+	w.Header().Set("Content-Type", "application/json")
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&data)
+	if err != nil{
+		erronAux("Something went wrong", w)
+		return
+	}
+	if len(data.Body) > 140{
+		erronAux("Chirp is too long", w)
+		return 
+	}
+	res := resp{
+		Valid: true,
+	}
+	dat, _ := json.Marshal(res)
+	w.WriteHeader(http.StatusOK)
+	w.Write(dat)
+}
 
 
 func main(){
@@ -71,6 +110,7 @@ func main(){
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("GET /api/healthz", healthz)
+	mux.HandleFunc("POST /api/validate_chirp", validate_chirpHandle)
 	fmt.Println("Server running on port 8080")
 	server.ListenAndServe();
 }
