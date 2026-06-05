@@ -1,12 +1,17 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
-	
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/nyingikachimbelengue/Chirpy-clone/internal/database"
 
 	_ "golang.org/x/tools/go/cfg"
 )
@@ -14,6 +19,7 @@ import (
 
 
 type apiConfig struct {
+	dbQueries *database.Queries
 	fileserverHits atomic.Int32
 }
 	type parameter struct{
@@ -58,7 +64,7 @@ func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request){
 	cfg.fileserverHits.Store(0)
 }
 
-func erronAux(msg string, w http.ResponseWriter){
+func errorAux(msg string, w http.ResponseWriter){
 	res := error{
 		Err: msg, 
 	}
@@ -93,11 +99,11 @@ func validate_chirpHandle(w http.ResponseWriter, r *http.Request){
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&data)
 	if err != nil{
-		erronAux("Something went wrong", w)
+		errorAux("Something went wrong", w)
 		return
 	}
 	if len(data.Body) > 140{
-		erronAux("Chirp is too long", w)
+		errorAux("Chirp is too long", w)
 		return 
 	}
 	retorno := cleanOutput(data.Body)
@@ -111,30 +117,30 @@ func validate_chirpHandle(w http.ResponseWriter, r *http.Request){
 }
 
 
+
 func main(){
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, _ := sql.Open("postgres", dbURL)
+	apiCfg := apiConfig{
+		dbQueries : database.New(db),
+	}
 	mux := http.NewServeMux();
 	server := http.Server{
 		Addr: ":8080",
 		Handler: mux,
 	}
-	apiCfg := apiConfig{}
-	//rota index.html
-	mux.Handle("/app/", http.StripPrefix( "/app/", apiCfg.middlewareMetricsInc( http.FileServer(http.Dir(".")))))
-
-	//servir imagens
-	// 1 - Definir diretorio do arquivo
+	
 	srcImage := http.Dir("./assets")
-	// 2 - Criar o servidor de arquivo
 	serverImage := http.FileServer(srcImage)
-
-	filterPath := http.StripPrefix("/app/assets", apiCfg.middlewareMetricsInc(serverImage))
+	filterPath := http.StripPrefix("/app/assets", apiCfg.middlewareMetricsInc(serverImage))	
 	mux.Handle("/app/assets/logo.png", filterPath)
-
-
+	mux.Handle("/app/", http.StripPrefix( "/app/", apiCfg.middlewareMetricsInc( http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("GET /api/healthz", healthz)
 	mux.HandleFunc("POST /api/validate_chirp", validate_chirpHandle)
+	mux.HandleFunc("POST /api/users", )
 	fmt.Println("Server running on port 8080")
 	server.ListenAndServe();
 }
