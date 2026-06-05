@@ -6,15 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"sync/atomic"
+
+
+	"time"
 
 	"github.com/google/uuid"
 	_ "github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/nyingikachimbelengue/Chirpy-clone/internal/auth"
 	"github.com/nyingikachimbelengue/Chirpy-clone/internal/database"
-	"time"
 	_ "golang.org/x/tools/go/cfg"
 )
 
@@ -25,14 +27,9 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	platform string
 }
-	type parameter struct{
-		Body string `json:"body"`
-	}
+
 	type error struct{
 		Err string `json:"err"`
-	}
-	type resp struct{
-		Cleaned_body string `json:"cleaned_body"`
 	}
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -84,29 +81,10 @@ func errorAux(msg string, w http.ResponseWriter){
 	w.Write(dat)
 }
 
-func cleanOutput(s string) string{
-	div := strings.Split(s, " ")
-	
-	for i, t := range div{
-		w := strings.ToLower(t)
-		if w == "kerfuffle"{
-			div[i] = strings.ReplaceAll(w, "kerfuffle", "****")
-		}
-		if w == "sharbert"{
-			div[i] = strings.ReplaceAll(w, "sharbert", "****")
-		}
-		if w == "fornax"{
-			div[i] = strings.ReplaceAll(w, "fornax", "****")
-		}
-		
-	}
-	res := strings.Join(div, " ")
-	return res
-}
-
 func (apiCfg *apiConfig) createUsers(w http.ResponseWriter, r *http.Request){
 	type Userdata struct{
 		Email string
+		Password string
 	}
 	type resData struct{
 		Id string `json:"id"`
@@ -118,7 +96,8 @@ func (apiCfg *apiConfig) createUsers(w http.ResponseWriter, r *http.Request){
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&Udata)
 	if err != nil{}
-	data , err := apiCfg.dbQueries.CreateUser(r.Context(), Udata.Email)
+	password := auth.HashPassword(Udata.Password)
+	data , err := apiCfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{Email: Udata.Email, HashedPassword: password})
 	if err != nil{}
 	w.WriteHeader(http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
@@ -194,6 +173,132 @@ func (apiCfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(dat)
 }
 
+func (apiCfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request){
+	type resChirp struct {
+		Id         string `json:"id"`
+		Created_at string `json:"created_at"`
+		Updated_at string `json:"updated_at"`
+		Body       string `json:"body"`
+		User_id    string `json:"user_id"`
+	}
+	data, err := apiCfg.dbQueries.GetAllChirps(r.Context())
+	if err != nil {
+		errorAux("error fetching chirp", w)
+		return
+	}
+	var Chirps []resChirp
+	for _, chirp := range(data){
+		Chirps = append(Chirps, resChirp{
+			Id: chirp.ID.String(),
+			Created_at: chirp.CreatedAt.Format(time.RFC3339),
+			Updated_at: chirp.UpdatedAt.Format(time.RFC3339),
+			Body: chirp.Body,
+			User_id: chirp.UserID.String(),
+		})
+	}
+	dat, err := json.Marshal(Chirps)
+	if err != nil {
+		errorAux("error marshalling response", w)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(dat)
+}
+
+func (apiCfg *apiConfig) getChirpById(w http.ResponseWriter, r *http.Request){
+	type resChirp struct {
+		Id         string `json:"id"`
+		Created_at string `json:"created_at"`
+		Updated_at string `json:"updated_at"`
+		Body       string `json:"body"`
+		User_id    string `json:"user_id"`
+	}
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if chirpID == uuid.Nil || err != nil{
+		errorAux("Nenhum chirp passado", w)
+		return
+	}
+	data, err := apiCfg.dbQueries.GetChirpById(r.Context(), chirpID)
+	if err != nil{
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"err":"chirp not found"}`))
+		return
+	} 
+	tmpChirp := resChirp{
+		Id: data.ID.String(),
+		Created_at: data.CreatedAt.Format(time.RFC3339),
+		Updated_at: data.UpdatedAt.Format(time.RFC3339),
+		Body: data.Body,
+		User_id: data.UserID.String(),
+	}
+	res, err := json.Marshal(tmpChirp)
+	if err != nil{
+		errorAux("Error", w)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(res)
+}
+
+func (apiCfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request){
+	type getData struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	type resData struct{
+		Id string `json:"id"`
+		Created_at string `json:"created_at"`
+		Updated_at string `json:"updated_at"`
+		Email string `json:"email"`
+	}
+	var gData getData
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&gData)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"err":"Something went wrong"}`))
+		return
+	}
+	dataUser, err := apiCfg.dbQueries.GetUserById(r.Context(), gData.Email)
+
+	if err != nil{
+		fmt.Println(err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"Incorrect email or password"}`))
+		return 
+	}
+	verifyPassword, err := auth.CheckPasswordHash(gData.Password, dataUser.HashedPassword)
+	if verifyPassword == false || err != nil{
+		fmt.Println(err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"Incorrect email or password"}`))
+		return
+	}
+
+	res := resData{
+		Id: dataUser.ID.String(),
+		Created_at: dataUser.CreatedAt.Format(time.RFC3339),
+		Updated_at: dataUser.UpdatedAt.Format(time.RFC3339),
+		Email: dataUser.Email,
+	}
+	finallyData, err := json.Marshal(res)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"err":"error marshalling response"}`))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(finallyData)
+}
 func main(){
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -219,6 +324,9 @@ func main(){
 	mux.HandleFunc("GET /api/healthz", healthz)
 	mux.HandleFunc("POST /api/users", apiCfg.createUsers)
 	mux.HandleFunc("POST /api/chirps", apiCfg.chirpsHandler)
+	mux.HandleFunc("GET /api/chirps", apiCfg.getAllChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getChirpById)
+	mux.HandleFunc("POST /api/login", apiCfg.loginUser)
 	fmt.Println("Server running on port 8080")
 	server.ListenAndServe();
 }
