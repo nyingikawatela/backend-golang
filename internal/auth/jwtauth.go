@@ -4,9 +4,12 @@ package auth
 import (
 	"errors"
 	"time"
- 
+	"strings"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"net/http"
+	 "crypto/rand"
+    "encoding/hex"
 )
  
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
@@ -59,3 +62,20 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	return userID, nil
 }
 
+func GetBearerToken(headers http.Header) (string, error){
+	authHeader := headers.Get("Authorization")
+	if authHeader == ""{
+		return "", errors.New("Token inexistente")
+	}
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	return token, nil
+}
+
+func MakeRefreshToken() string{
+	bytes := make([]byte, 32)
+    _, err := rand.Read(bytes)
+    if err != nil {
+        return ""
+    }
+    return hex.EncodeToString(bytes)
+}
