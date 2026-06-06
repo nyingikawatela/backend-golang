@@ -386,6 +386,75 @@ func (apiCfg *apiConfig) revokeHandler(w http.ResponseWriter, r *http.Request) {
 
     w.WriteHeader(http.StatusNoContent)
 }
+
+func (apiCfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) {
+    type reqData struct {
+        Email    string `json:"email"`
+        Password string `json:"password"`
+    }
+    type resData struct {
+        Id         string `json:"id"`
+        Created_at string `json:"created_at"`
+        Updated_at string `json:"updated_at"`
+        Email      string `json:"email"`
+    }
+
+    // validar access token
+    bearer, err := auth.GetBearerToken(r.Header)
+    if err != nil {
+        w.WriteHeader(http.StatusUnauthorized)
+        return
+    }
+
+    userID, err := auth.ValidateJWT(bearer, apiCfg.jwtKey)
+    if err != nil {
+        w.WriteHeader(http.StatusUnauthorized)
+        return
+    }
+
+    // ler body
+    var rData reqData
+    decoder := json.NewDecoder(r.Body)
+    err = decoder.Decode(&rData)
+    if err != nil {
+        w.WriteHeader(http.StatusBadRequest)
+        return
+    }
+
+    // hash da nova password
+    hashedPassword := auth.HashPassword(rData.Password)
+
+    // actualizar na BD
+    data, err := apiCfg.dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
+        Email:          rData.Email,
+        HashedPassword: hashedPassword,
+        ID:             userID,
+    })
+    if err != nil {
+        w.WriteHeader(http.StatusInternalServerError)
+        return
+    }
+
+    res := resData{
+        Id:         data.ID.String(),
+        Created_at: data.CreatedAt.Format(time.RFC3339),
+        Updated_at: data.UpdatedAt.Format(time.RFC3339),
+        Email:      data.Email,
+    }
+
+    dat, err := json.Marshal(res)
+    if err != nil {
+        w.WriteHeader(http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusOK)
+    w.Write(dat)
+}
+
+
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -417,6 +486,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", apiCfg.loginUser)
 	mux.HandleFunc("POST /api/refresh", apiCfg.Refresh)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revokeHandler)
+	mux.HandleFunc("PUT /api/users", apiCfg.updateUserHandler)
 	fmt.Println("Server running on port 8080")
 	server.ListenAndServe()
 }
