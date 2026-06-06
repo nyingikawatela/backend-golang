@@ -24,6 +24,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	platform       string
 	jwtKey         string
+	polkaKey string
 }
 
 type error struct {
@@ -89,6 +90,7 @@ func (apiCfg *apiConfig) createUsers(w http.ResponseWriter, r *http.Request) {
 		Created_at string `json:"created_at"`
 		Updated_at string `json:"updated_at"`
 		Email      string `json:"email"`
+		Is_chirpy_red bool   `json:"is_chirpy_red"`
 	}
 	var Udata Userdata
 	decoder := json.NewDecoder(r.Body)
@@ -106,6 +108,7 @@ func (apiCfg *apiConfig) createUsers(w http.ResponseWriter, r *http.Request) {
 		Created_at: data.CreatedAt.String(),
 		Updated_at: data.UpdatedAt.String(),
 		Email:      data.Email,
+		Is_chirpy_red: data.IsChirpyRed,
 	}
 	dat, err := json.Marshal(res)
 	if err != nil {
@@ -264,6 +267,7 @@ func (apiCfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		Created_at string `json:"created_at"`
 		Updated_at string `json:"updated_at"`
 		Email      string `json:"email"`
+		Is_chirpy_red bool   `json:"is_chirpy_red"`
 		Token      string `json:"token"`
 		Refresh_token string `json:"refresh_token"`
 	}
@@ -313,6 +317,7 @@ func (apiCfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		Created_at: dataUser.CreatedAt.Format(time.RFC3339),
 		Updated_at: dataUser.UpdatedAt.Format(time.RFC3339),
 		Email:      dataUser.Email,
+		Is_chirpy_red: dataUser.IsChirpyRed,
 		Token:      tokenStr,
 		Refresh_token: refreshToken.Token,
 	}
@@ -397,9 +402,8 @@ func (apiCfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Reques
         Created_at string `json:"created_at"`
         Updated_at string `json:"updated_at"`
         Email      string `json:"email"`
+		Is_chirpy_red bool   `json:"is_chirpy_red"`
     }
-
-    // validar access token
     bearer, err := auth.GetBearerToken(r.Header)
     if err != nil {
         w.WriteHeader(http.StatusUnauthorized)
@@ -411,8 +415,6 @@ func (apiCfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Reques
         w.WriteHeader(http.StatusUnauthorized)
         return
     }
-
-    // ler body
     var rData reqData
     decoder := json.NewDecoder(r.Body)
     err = decoder.Decode(&rData)
@@ -420,11 +422,8 @@ func (apiCfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Reques
         w.WriteHeader(http.StatusBadRequest)
         return
     }
-
-    // hash da nova password
     hashedPassword := auth.HashPassword(rData.Password)
 
-    // actualizar na BD
     data, err := apiCfg.dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
         Email:          rData.Email,
         HashedPassword: hashedPassword,
@@ -440,6 +439,7 @@ func (apiCfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Reques
         Created_at: data.CreatedAt.Format(time.RFC3339),
         Updated_at: data.UpdatedAt.Format(time.RFC3339),
         Email:      data.Email,
+		Is_chirpy_red: data.IsChirpyRed,
     }
 
     dat, err := json.Marshal(res)
@@ -454,7 +454,84 @@ func (apiCfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Reques
 }
 
 
+func (apiCfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Request) {
+    // validar token
+    bearer, err := auth.GetBearerToken(r.Header)
+    if err != nil {
+        w.WriteHeader(http.StatusUnauthorized)
+        return
+    }
 
+    userID, err := auth.ValidateJWT(bearer, apiCfg.jwtKey)
+    if err != nil {
+        w.WriteHeader(http.StatusUnauthorized)
+        return
+    }
+
+    // buscar chirp
+    chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+    if err != nil {
+        w.WriteHeader(http.StatusBadRequest)
+        return
+    }
+
+    chirp, err := apiCfg.dbQueries.GetChirpById(r.Context(), chirpID)
+    if err != nil {
+        w.WriteHeader(http.StatusNotFound)
+        return
+    }
+
+    // verificar se é o autor
+    if chirp.UserID != userID {
+        w.WriteHeader(http.StatusForbidden)
+        return
+    }
+
+    // apagar
+    err = apiCfg.dbQueries.DeleteChirp(r.Context(), chirpID)
+    if err != nil {
+        w.WriteHeader(http.StatusInternalServerError)
+        return
+    }
+
+    w.WriteHeader(http.StatusNoContent)
+}
+
+func (apiCfg *apiConfig) polkaWebhook(w http.ResponseWriter, r *http.Request) {
+	type reqData struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	var rData reqData
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&rData)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if rData.Event != "user.upgraded" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	userID, err := uuid.Parse(rData.Data.UserID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	data, err := apiCfg.dbQueries.UpdateRedChirp(r.Context(), userID)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	_ = data
+	w.WriteHeader(http.StatusNoContent)
+}
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -487,6 +564,8 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", apiCfg.Refresh)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revokeHandler)
 	mux.HandleFunc("PUT /api/users", apiCfg.updateUserHandler)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.deleteChirpHandler)
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.polkaWebhook)
 	fmt.Println("Server running on port 8080")
 	server.ListenAndServe()
 }
