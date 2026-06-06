@@ -504,10 +504,18 @@ func (apiCfg *apiConfig) polkaWebhook(w http.ResponseWriter, r *http.Request) {
 			UserID string `json:"user_id"`
 		} `json:"data"`
 	}
-
+	apiKey, err := auth.GetAPIKey(r.Header)
+	 if err != nil {
+        w.WriteHeader(http.StatusUnauthorized)
+        return
+    }
+	if apiKey != apiCfg.polkaKey{
+		w.WriteHeader(http.StatusUnauthorized)
+        return
+	}
 	var rData reqData
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&rData)
+	err = decoder.Decode(&rData)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -541,6 +549,7 @@ func main() {
 		dbQueries: database.New(db),
 		platform:  os.Getenv("PLATFORM"),
 		jwtKey:    os.Getenv("JWT"),
+		polkaKey: os.Getenv("POLKA_KEY"),
 	}
 	mux := http.NewServeMux()
 	server := http.Server{
