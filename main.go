@@ -24,7 +24,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	platform       string
 	jwtKey         string
-	polkaKey string
+	polkaKey       string
 }
 
 type error struct {
@@ -58,7 +58,6 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("platform:", cfg.platform)
 	if cfg.platform != "dev" {
 		w.WriteHeader(http.StatusForbidden)
 		return
@@ -86,10 +85,10 @@ func (apiCfg *apiConfig) createUsers(w http.ResponseWriter, r *http.Request) {
 		Password string
 	}
 	type resData struct {
-		Id         string `json:"id"`
-		Created_at string `json:"created_at"`
-		Updated_at string `json:"updated_at"`
-		Email      string `json:"email"`
+		Id            string `json:"id"`
+		Created_at    string `json:"created_at"`
+		Updated_at    string `json:"updated_at"`
+		Email         string `json:"email"`
 		Is_chirpy_red bool   `json:"is_chirpy_red"`
 	}
 	var Udata Userdata
@@ -104,10 +103,10 @@ func (apiCfg *apiConfig) createUsers(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
 	res := resData{
-		Id:         data.ID.String(),
-		Created_at: data.CreatedAt.String(),
-		Updated_at: data.UpdatedAt.String(),
-		Email:      data.Email,
+		Id:            data.ID.String(),
+		Created_at:    data.CreatedAt.String(),
+		Updated_at:    data.UpdatedAt.String(),
+		Email:         data.Email,
 		Is_chirpy_red: data.IsChirpyRed,
 	}
 	dat, err := json.Marshal(res)
@@ -129,14 +128,14 @@ func (apiCfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 		User_id    string `json:"user_id"`
 	}
 	bearer, err := auth.GetBearerToken(r.Header)
-	if err != nil{
+	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte("Token invalido"))
 		return
 	}
 	isValid, err := auth.ValidateJWT(bearer, apiCfg.jwtKey)
-	if isValid == uuid.Nil || err != nil{
+	if isValid == uuid.Nil || err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte("Token invalido"))
@@ -161,7 +160,6 @@ func (apiCfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 		Body:   Rdata.Body,
 		UserID: userID,
 	})
-	fmt.Println(err)
 	if err != nil {
 		errorAux("error creating chirp", w)
 		return
@@ -194,7 +192,36 @@ func (apiCfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
 		Body       string `json:"body"`
 		User_id    string `json:"user_id"`
 	}
+	s := r.URL.Query().Get("author_id")
+	if s != "" {
+		authorId, _ := uuid.Parse(s)
+		data, err := apiCfg.dbQueries.GetChirpByAuthor(r.Context(), authorId)
+		if err != nil {
+			errorAux("error marshalling response", w)
+			return
+		}
+		var Chirps []resChirp
+		for _, chirp := range data {
+			Chirps = append(Chirps, resChirp{
+				Id:         chirp.ID.String(),
+				Created_at: chirp.CreatedAt.Format(time.RFC3339),
+				Updated_at: chirp.UpdatedAt.Format(time.RFC3339),
+				Body:       chirp.Body,
+				User_id:    chirp.UserID.String(),
+			})
+		}
+		res, err := json.Marshal(Chirps)
+		if err != nil {
+			errorAux("error marshalling response", w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(res)
+		return
+	}
 	data, err := apiCfg.dbQueries.GetAllChirps(r.Context())
+
 	if err != nil {
 		errorAux("error fetching chirp", w)
 		return
@@ -259,16 +286,16 @@ func (apiCfg *apiConfig) getChirpById(w http.ResponseWriter, r *http.Request) {
 
 func (apiCfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 	type getData struct {
-		Password         string `json:"password"`
-		Email            string `json:"email"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 	type resData struct {
-		Id         string `json:"id"`
-		Created_at string `json:"created_at"`
-		Updated_at string `json:"updated_at"`
-		Email      string `json:"email"`
+		Id            string `json:"id"`
+		Created_at    string `json:"created_at"`
+		Updated_at    string `json:"updated_at"`
+		Email         string `json:"email"`
 		Is_chirpy_red bool   `json:"is_chirpy_red"`
-		Token      string `json:"token"`
+		Token         string `json:"token"`
 		Refresh_token string `json:"refresh_token"`
 	}
 	var gData getData
@@ -283,7 +310,6 @@ func (apiCfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 	dataUser, err := apiCfg.dbQueries.GetUserById(r.Context(), gData.Email)
 
 	if err != nil {
-		fmt.Println(err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"Incorrect email or password"}`))
@@ -291,7 +317,6 @@ func (apiCfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 	}
 	verifyPassword, err := auth.CheckPasswordHash(gData.Password, dataUser.HashedPassword)
 	if verifyPassword == false || err != nil {
-		fmt.Println(err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"Incorrect email or password"}`))
@@ -305,20 +330,20 @@ func (apiCfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	randRToken := auth.MakeRefreshToken()
-	refreshToken, err := apiCfg.dbQueries.CreateToken(r.Context(), database.CreateTokenParams{Token: randRToken, UserID: dataUser.ID, ExpiresAt: time.Now().UTC().Add(time.Hour * 24 * 60),})
-	if err != nil{
+	refreshToken, err := apiCfg.dbQueries.CreateToken(r.Context(), database.CreateTokenParams{Token: randRToken, UserID: dataUser.ID, ExpiresAt: time.Now().UTC().Add(time.Hour * 24 * 60)})
+	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"err":"error creating refresh token"}`))
 		return
 	}
 	res := resData{
-		Id:         dataUser.ID.String(),
-		Created_at: dataUser.CreatedAt.Format(time.RFC3339),
-		Updated_at: dataUser.UpdatedAt.Format(time.RFC3339),
-		Email:      dataUser.Email,
+		Id:            dataUser.ID.String(),
+		Created_at:    dataUser.CreatedAt.Format(time.RFC3339),
+		Updated_at:    dataUser.UpdatedAt.Format(time.RFC3339),
+		Email:         dataUser.Email,
 		Is_chirpy_red: dataUser.IsChirpyRed,
-		Token:      tokenStr,
+		Token:         tokenStr,
 		Refresh_token: refreshToken.Token,
 	}
 	finallyData, err := json.Marshal(res)
@@ -333,12 +358,12 @@ func (apiCfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 	w.Write(finallyData)
 }
 
-func (apiCfg *apiConfig) Refresh(w http.ResponseWriter, r *http.Request){
-	type RES struct{
+func (apiCfg *apiConfig) Refresh(w http.ResponseWriter, r *http.Request) {
+	type RES struct {
 		Token string `json:"token"`
 	}
 	bearer, err := auth.GetBearerToken(r.Header)
-	if err != nil || bearer == ""{
+	if err != nil || bearer == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte("Token invalido"))
@@ -367,7 +392,7 @@ func (apiCfg *apiConfig) Refresh(w http.ResponseWriter, r *http.Request){
 		Token: tokenStr,
 	}
 	data, err := json.Marshal(res)
-	if err != nil{
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -377,124 +402,123 @@ func (apiCfg *apiConfig) Refresh(w http.ResponseWriter, r *http.Request){
 }
 
 func (apiCfg *apiConfig) revokeHandler(w http.ResponseWriter, r *http.Request) {
-    bearer, err := auth.GetBearerToken(r.Header)
-    if err != nil {
-        w.WriteHeader(http.StatusUnauthorized)
-        return
-    }
+	bearer, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 
-    err = apiCfg.dbQueries.RevokeRefreshToken(r.Context(), bearer)
-    if err != nil {
-        w.WriteHeader(http.StatusInternalServerError)
-        return
-    }
+	err = apiCfg.dbQueries.RevokeRefreshToken(r.Context(), bearer)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
-    w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (apiCfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) {
-    type reqData struct {
-        Email    string `json:"email"`
-        Password string `json:"password"`
-    }
-    type resData struct {
-        Id         string `json:"id"`
-        Created_at string `json:"created_at"`
-        Updated_at string `json:"updated_at"`
-        Email      string `json:"email"`
+	type reqData struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	type resData struct {
+		Id            string `json:"id"`
+		Created_at    string `json:"created_at"`
+		Updated_at    string `json:"updated_at"`
+		Email         string `json:"email"`
 		Is_chirpy_red bool   `json:"is_chirpy_red"`
-    }
-    bearer, err := auth.GetBearerToken(r.Header)
-    if err != nil {
-        w.WriteHeader(http.StatusUnauthorized)
-        return
-    }
+	}
+	bearer, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 
-    userID, err := auth.ValidateJWT(bearer, apiCfg.jwtKey)
-    if err != nil {
-        w.WriteHeader(http.StatusUnauthorized)
-        return
-    }
-    var rData reqData
-    decoder := json.NewDecoder(r.Body)
-    err = decoder.Decode(&rData)
-    if err != nil {
-        w.WriteHeader(http.StatusBadRequest)
-        return
-    }
-    hashedPassword := auth.HashPassword(rData.Password)
+	userID, err := auth.ValidateJWT(bearer, apiCfg.jwtKey)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	var rData reqData
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&rData)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	hashedPassword := auth.HashPassword(rData.Password)
 
-    data, err := apiCfg.dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
-        Email:          rData.Email,
-        HashedPassword: hashedPassword,
-        ID:             userID,
-    })
-    if err != nil {
-        w.WriteHeader(http.StatusInternalServerError)
-        return
-    }
+	data, err := apiCfg.dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
+		Email:          rData.Email,
+		HashedPassword: hashedPassword,
+		ID:             userID,
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
-    res := resData{
-        Id:         data.ID.String(),
-        Created_at: data.CreatedAt.Format(time.RFC3339),
-        Updated_at: data.UpdatedAt.Format(time.RFC3339),
-        Email:      data.Email,
+	res := resData{
+		Id:            data.ID.String(),
+		Created_at:    data.CreatedAt.Format(time.RFC3339),
+		Updated_at:    data.UpdatedAt.Format(time.RFC3339),
+		Email:         data.Email,
 		Is_chirpy_red: data.IsChirpyRed,
-    }
+	}
 
-    dat, err := json.Marshal(res)
-    if err != nil {
-        w.WriteHeader(http.StatusInternalServerError)
-        return
-    }
+	dat, err := json.Marshal(res)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    w.Write(dat)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(dat)
 }
 
-
 func (apiCfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Request) {
-    // validar token
-    bearer, err := auth.GetBearerToken(r.Header)
-    if err != nil {
-        w.WriteHeader(http.StatusUnauthorized)
-        return
-    }
+	// validar token
+	bearer, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 
-    userID, err := auth.ValidateJWT(bearer, apiCfg.jwtKey)
-    if err != nil {
-        w.WriteHeader(http.StatusUnauthorized)
-        return
-    }
+	userID, err := auth.ValidateJWT(bearer, apiCfg.jwtKey)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 
-    // buscar chirp
-    chirpID, err := uuid.Parse(r.PathValue("chirpID"))
-    if err != nil {
-        w.WriteHeader(http.StatusBadRequest)
-        return
-    }
+	// buscar chirp
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
-    chirp, err := apiCfg.dbQueries.GetChirpById(r.Context(), chirpID)
-    if err != nil {
-        w.WriteHeader(http.StatusNotFound)
-        return
-    }
+	chirp, err := apiCfg.dbQueries.GetChirpById(r.Context(), chirpID)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 
-    // verificar se é o autor
-    if chirp.UserID != userID {
-        w.WriteHeader(http.StatusForbidden)
-        return
-    }
+	// verificar se é o autor
+	if chirp.UserID != userID {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
 
-    // apagar
-    err = apiCfg.dbQueries.DeleteChirp(r.Context(), chirpID)
-    if err != nil {
-        w.WriteHeader(http.StatusInternalServerError)
-        return
-    }
+	// apagar
+	err = apiCfg.dbQueries.DeleteChirp(r.Context(), chirpID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
-    w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (apiCfg *apiConfig) polkaWebhook(w http.ResponseWriter, r *http.Request) {
@@ -505,13 +529,13 @@ func (apiCfg *apiConfig) polkaWebhook(w http.ResponseWriter, r *http.Request) {
 		} `json:"data"`
 	}
 	apiKey, err := auth.GetAPIKey(r.Header)
-	 if err != nil {
-        w.WriteHeader(http.StatusUnauthorized)
-        return
-    }
-	if apiKey != apiCfg.polkaKey{
+	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-        return
+		return
+	}
+	if apiKey != apiCfg.polkaKey {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
 	}
 	var rData reqData
 	decoder := json.NewDecoder(r.Body)
@@ -549,7 +573,7 @@ func main() {
 		dbQueries: database.New(db),
 		platform:  os.Getenv("PLATFORM"),
 		jwtKey:    os.Getenv("JWT"),
-		polkaKey: os.Getenv("POLKA_KEY"),
+		polkaKey:  os.Getenv("POLKA_KEY"),
 	}
 	mux := http.NewServeMux()
 	server := http.Server{

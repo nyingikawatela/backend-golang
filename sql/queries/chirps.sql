@@ -10,7 +10,6 @@ SELECT * FROM chirps;
 SELECT * FROM chirps WHERE id = $1;
 
 
-
 -- name: DeleteChirp :exec
 DELETE FROM chirps
 WHERE id = $1;
@@ -19,3 +18,6 @@ WHERE id = $1;
 UPDATE users SET is_chirpy_red = true WHERE id = $1
 
 RETURNING *;
+
+-- name: GetChirpByAuthor :many
+SELECT * FROM chirps WHERE user_id = $1;
