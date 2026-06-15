@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
-
+	"sort"
 	"github.com/google/uuid"
 	"github.com/nyingikachimbelengue/Chirpy-clone/internal/auth"
 	"github.com/nyingikachimbelengue/Chirpy-clone/internal/database"
@@ -75,56 +75,54 @@ func (apiCfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (apiCfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
-	s := r.URL.Query().Get("author_id")
-	if s != "" {
-		authorId, _ := uuid.Parse(s)
-		data, err := apiCfg.dbQueries.GetChirpByAuthor(r.Context(), authorId)
-		if err != nil {
-			errorAux("error marshalling response", w)
-			return
-		}
-		var Chirps []response.ChirpResponse
-		for _, chirp := range data {
-			Chirps = append(Chirps, response.ChirpResponse{
-				Id:         chirp.ID.String(),
-				Created_at: chirp.CreatedAt.Format(time.RFC3339),
-				Updated_at: chirp.UpdatedAt.Format(time.RFC3339),
-				Body:       chirp.Body,
-				User_id:    chirp.UserID.String(),
-			})
-		}
-		res, err := json.Marshal(Chirps)
-		if err != nil {
-			errorAux("error marshalling response", w)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(res)
-		return
+	authorIDStr := r.URL.Query().Get("author_id")
+	sortDir := r.URL.Query().Get("sort")
+	if sortDir != "desc" {
+		sortDir = "asc"
 	}
-	data, err := apiCfg.dbQueries.GetAllChirps(r.Context())
+
+	var chirps []database.Chirp
+	var err error
+
+	if authorIDStr != "" {
+		authorID, parseErr := uuid.Parse(authorIDStr)
+		if parseErr != nil {
+			errorAux("invalid author_id", w)
+			return
+		}
+		chirps, err = apiCfg.dbQueries.GetChirpByAuthor(r.Context(), authorID)
+	} else {
+		chirps, err = apiCfg.dbQueries.GetAllChirps(r.Context())
+	}
 
 	if err != nil {
-		errorAux("error fetching chirp", w)
+		errorAux("error fetching chirps", w)
 		return
 	}
-	var Chirps []response.ChirpResponse
-	for _, chirp := range data {
-		Chirps = append(Chirps, response.ChirpResponse{
+
+	sort.Slice(chirps, func(i, j int) bool {
+		if sortDir == "desc" {
+			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+		}
+		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+	})
+
+	res := make([]response.ChirpResponse, len(chirps))
+	for i, chirp := range chirps {
+		res[i] = response.ChirpResponse{
 			Id:         chirp.ID.String(),
 			Created_at: chirp.CreatedAt.Format(time.RFC3339),
 			Updated_at: chirp.UpdatedAt.Format(time.RFC3339),
 			Body:       chirp.Body,
 			User_id:    chirp.UserID.String(),
-		})
+		}
 	}
-	dat, err := json.Marshal(Chirps)
+
+	dat, err := json.Marshal(res)
 	if err != nil {
 		errorAux("error marshalling response", w)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(dat)
@@ -173,7 +171,6 @@ func (apiCfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// buscar chirp
 	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -185,14 +182,10 @@ func (apiCfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-
-	// verificar se é o autor
 	if chirp.UserID != userID {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-
-	// apagar
 	err = apiCfg.dbQueries.DeleteChirp(r.Context(), chirpID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
